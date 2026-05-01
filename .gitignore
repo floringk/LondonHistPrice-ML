@@ -1,0 +1,18 @@
+.ipynb_checkpoints/
+__pycache__/
+*.py[cod]
+data/
+*.parquet
+.venv/
+venv/
+.env
+
+# Local environments and tooling (do not commit)
+.conda/
+anaconda_projects/
+
+# Scratch / editor artifacts
+Untitled
+
+# Large raw data (see README for acquisition)
+dataset/*.csv

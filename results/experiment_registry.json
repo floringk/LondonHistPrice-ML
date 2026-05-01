@@ -1,0 +1,14 @@
+{
+  "run_name": "london_phase2_baseline",
+  "target": "history_price",
+  "date_axis": "history_date",
+  "split_policy": "calendar_fair_70_10_20_by_time_span",
+  "primary_metric": "test_rmse",
+  "artifacts": {
+    "model_results_summary": "C:\\Projects\\ML Model\\data\\model_results_summary.csv",
+    "feature_importance": "C:\\Projects\\ML Model\\data\\feature_importance.csv",
+    "test_predictions": "C:\\Projects\\ML Model\\data\\test_predictions.csv",
+    "test_rmse_by_year": "C:\\Projects\\ML Model\\data\\test_rmse_by_year.csv",
+    "segment_metrics": "C:\\Projects\\ML Model\\data\\segment_metrics.csv"
+  }
+}

@@ -1,0 +1,4 @@
+segment_type,segment_value,rows,rmse,status,action_owner,mitigation_plan
+propertyType,Semi-Detached Property,223,825627.4951889581,accept_with_business_signoff,product_owner,business_risk_acceptance
+price_band,"(1000000.0, 4400000.0]",26061,768250.5869241105,mitigate_in_model,ml_team,segment_features_or_calibration
+propertyType,Detached House,3733,746635.1696911864,mitigate_in_model,ml_team,segment_features_or_calibration

@@ -1,0 +1,2 @@
+mainline_best_rmse,mainline_best_mae,assisted_best_rmse,assisted_best_mae,external_best_rmse,external_best_mae,delta_assisted_vs_mainline_rmse,delta_benchmark_vs_mainline_rmse,preferred_track_rmse
+393489.2706136952,216082.63981739493,304436.22230686987,158399.3258561872,350168.20942803303,105702.66038895203,-89053.04830682534,-43321.06118566217,assisted

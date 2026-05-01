@@ -1,0 +1,4 @@
+benchmark,test_rows_used,test_mae,test_rmse
+saleEstimate_lowerPrice,130196,105702.66038895205,350168.20942803303
+saleEstimate_currentPrice,130196,129807.7476266552,416009.906581917
+saleEstimate_upperPrice,130196,182243.0635810624,516301.6359344686

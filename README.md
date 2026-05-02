@@ -75,6 +75,8 @@ Flags for `src/main.py`: `--baseline`, `--walk-forward`, `--benchmark`, `--assis
 
 Long-form write-up: [`task.md`](task.md).
 
+**Course / team:** what to cite for literature vs slides, slide bullets, and an IMRaD report with filled tables — [`docs/TEAM_HANDOUT.md`](docs/TEAM_HANDOUT.md) and [`docs/REPORT_IMRAD.md`](docs/REPORT_IMRAD.md).
+
 ## Accuracy metrics
 
 - **MAE / RMSE** on validation and test (pounds).  

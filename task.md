@@ -1,5 +1,7 @@
 # London Housing Price Prediction Project
 
+Extended methodology document: [`methodology.md`](methodology.md).
+
 ## Motivation (including research questions)
 
 The project goal is to build a house-price model that predicts future values as accurately as possible under a realistic time setting.  
@@ -172,21 +174,18 @@ Interpretation:
 
 Current status:
 
-1. Baseline is frozen with tuned HistGBR as primary candidate.
-2. Notebook logic has been converted into reproducible scripts:
-   - `src/london_pipeline.py`
-   - `src/run_london_pipeline.py`
-   - `src/walk_forward_validation.py`
-   - `src/external_benchmark_estimates.py`
-3. Experiment registry and output artifacts are generated in `data/`.
+1. Baseline is frozen with tuned HistGBR as primary candidate (mainline feature policy excludes `saleEstimate_*` / `rentEstimate_*` in `src/london_pipeline.py`).
+2. Notebook logic has been converted into reproducible scripts (`src/london_pipeline.py`, `src/run_london_pipeline.py`, `src/walk_forward_validation.py`, `src/external_benchmark_estimates.py`, `src/assisted_track.py`, `src/main.py`).
+3. Experiment registry and pipeline artifacts are generated in `data/`; governance and rollout policy are documented in [`GOVERNANCE.md`](GOVERNANCE.md).
+4. **Publish to teammates:** share `results/` (after `python "src/main.py" --report-only --sync-results`), plus `README.md`, `methodology.md`, `GOVERNANCE.md`, and `src/` as needed—omit raw `dataset/*.csv` unless agreed.
+5. **Dual-track governance:** read `governance_recommendation` in `data/model_decision_summary.csv` (mirrored in `results/`); deploy assisted models only on a controlled path; mainline remains the leakage-safe reference.
+6. **Segment blockers:** follow [`rollout/SEGMENT_BLOCKER_RESOLUTION.md`](rollout/SEGMENT_BLOCKER_RESOLUTION.md) before broad rollout; source CSV is `data/segment_blocker_actions.csv`.
+7. **Reproducibility:** use full pipeline + `src/main.py --report-only --sync-results` to refresh committed `results/`.
 
-Next steps:
+Ongoing:
 
-1. Keep tuned HistGBR as the leakage-safe mainline model and publish this result bundle to teammates.
-2. Continue dual-track governance: keep mainline clean and deploy assisted model in a controlled track (`deploy_assisted` from `data/model_decision_summary.csv`).
-3. Keep the primary model path separate for governance; do not merge `saleEstimate_*` into mainline training.
-4. Resolve segment blockers tracked in `data/segment_blocker_actions.csv` before broad rollout.
-5. Keep using CLI/report gates for reproducibility (`src/main.py --report-only`).
+- Improve segment RMSE or obtain documented sign-off until release gates align with org risk tolerance.
+- Keep GitHub repository **private** if sharing proprietary methodology or decisions (see `GOVERNANCE.md`).
 
 ## Conclusions
 

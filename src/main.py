@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -261,6 +263,43 @@ def write_consolidated_report(root: Path) -> Path:
     return report_path
 
 
+
+
+# Summaries committed under results/ for sharing (mirrored from data/ by sync_frozen_results).
+_FROZEN_ARTIFACT_NAMES = (
+    "model_results_summary.csv",
+    "run_report.md",
+    "walk_forward_results.csv",
+    "external_estimate_benchmark.csv",
+    "assisted_track_results.csv",
+    "model_decision_summary.csv",
+    "track_comparison_summary.csv",
+    "segment_blocker_actions.csv",
+    "experiment_registry.json",
+)
+
+
+def sync_frozen_results(root: Path) -> Path:
+    data_dir = root / "data"
+    results_dir = root / "results"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    copied: list[str] = []
+    for name in _FROZEN_ARTIFACT_NAMES:
+        src = data_dir / name
+        if src.is_file():
+            shutil.copy2(src, results_dir / name)
+            copied.append(name)
+    stamp_path = results_dir / "RUN_STAMP.txt"
+    stamp_path.write_text(
+        datetime.now(timezone.utc).isoformat(timespec="seconds") + "Z\n", encoding="utf-8"
+    )
+    print(
+        f"[main] Synced {len(copied)} file(s) to results/: {', '.join(copied) if copied else '(none)'}",
+        flush=True,
+    )
+    return stamp_path
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run London housing pipeline tasks.")
     parser.add_argument("--all", action="store_true", help="Run all tasks then write report.")
@@ -269,6 +308,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--benchmark", action="store_true", help="Run external benchmark.")
     parser.add_argument("--assisted", action="store_true", help="Run assisted track benchmark model.")
     parser.add_argument("--report-only", action="store_true", help="Only write consolidated report.")
+    parser.add_argument(
+        "--sync-results",
+        action="store_true",
+        help="After the report, copy summary artifacts from data/ to results/ (frozen teammate bundle).",
+    )
     return parser.parse_args()
 
 
@@ -303,6 +347,8 @@ def main() -> None:
 
     report_path = write_consolidated_report(root)
     print(f"[main] Saved consolidated report: {report_path}", flush=True)
+    if args.sync_results:
+        sync_frozen_results(root)
 
 
 if __name__ == "__main__":

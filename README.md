@@ -8,9 +8,17 @@ Private research repo: temporally split regression models predicting **`history_
 - **Time axis:** `history_date`  
 - **Evaluation:** Calendar-fair split — train / validation / test use **70% / 10% / 20% of elapsed calendar time** between min and max dates (not 70% of rows).
 
+Full methodology: see [`methodology.md`](methodology.md). **Deployment, dual-track policy, and teammate bundle:** see [`GOVERNANCE.md`](GOVERNANCE.md).
+
 ## Frozen metrics (committed)
 
-Summary tables and the consolidated report are copied into [`results/`](results/) after a full run (see [`results/RUN_STAMP.txt`](results/RUN_STAMP.txt)). Large working outputs stay in [`data/`](data/) (gitignored).
+After a full run, copy small summary files from `data/` into [`results/`](results/) with:
+
+```powershell
+python "src/main.py" --report-only --sync-results
+```
+
+This refreshes [`results/RUN_STAMP.txt`](results/RUN_STAMP.txt) and the CSV/JSON report mirrors. Large working outputs stay in [`data/`](data/) (gitignored).
 
 ## Setup
 
@@ -32,23 +40,23 @@ pip install -r requirements.txt
 
 Run each step from the project root. Use `;` to chain commands (not `&&` on older PowerShell).
 
-**Full evaluation bundle:**
+**Full evaluation bundle and frozen `results/` mirror:**
 
 ```powershell
 python "src/run_london_pipeline.py"
 python "src/assisted_track.py"
 python "src/walk_forward_validation.py"
 python "src/external_benchmark_estimates.py"
-python "src/main.py" --report-only
+python "src/main.py" --report-only --sync-results
 ```
 
-**One-shot (mainline + walk-forward + benchmark + assisted + report):**
+**One-shot (mainline + walk-forward + benchmark + assisted + report, then sync to `results/`):**
 
 ```powershell
-python "src/main.py" --all
+python "src/main.py" --all --sync-results
 ```
 
-Flags for `src/main.py`: `--baseline`, `--walk-forward`, `--benchmark`, `--assisted`, `--report-only`, `--all`.
+Flags for `src/main.py`: `--baseline`, `--walk-forward`, `--benchmark`, `--assisted`, `--report-only`, `--all`, `--sync-results`.
 
 ## Where the code lives
 
@@ -60,8 +68,10 @@ Flags for `src/main.py`: `--baseline`, `--walk-forward`, `--benchmark`, `--assis
 | [`src/walk_forward_validation.py`](src/walk_forward_validation.py) | Rolling time folds, RF stability |
 | [`src/external_benchmark_estimates.py`](src/external_benchmark_estimates.py) | Benchmark RMSE vs `saleEstimate_*` columns |
 | [`src/hparam_search.py`](src/hparam_search.py) | Bounded hyperparameter grid |
-| [`src/main.py`](src/main.py) | Orchestration + consolidated `run_report.md`, gates, decision CSVs |
+| [`src/main.py`](src/main.py) | Orchestration + consolidated `run_report.md`, gates, decision CSVs; `--sync-results` copies summaries to `results/` |
 | [`notebooks/01_london_phase1.ipynb`](notebooks/01_london_phase1.ipynb) | Original exploratory notebook |
+| [`GOVERNANCE.md`](GOVERNANCE.md) | Dual-track deployment policy, segment blockers, private-repo migration |
+| [`rollout/SEGMENT_BLOCKER_RESOLUTION.md`](rollout/SEGMENT_BLOCKER_RESOLUTION.md) | Pre-rollout checklist for segment gate failures |
 
 Long-form write-up: [`task.md`](task.md).
 
@@ -85,15 +95,9 @@ Legacy Colab EDA scripts (`o_altă_copie_*.py`) can stay on your machine for ref
 
 ## GitHub (private)
 
-After cloning, add data, run the pipeline, and open a PR with updated `results/` if you change methodology.
+To move from a **public** repo to **private**, use GitHub **Settings → General → Danger zone → Change repository visibility** (keeps history), or delete and recreate a private repo (see [`GOVERNANCE.md`](GOVERNANCE.md) § 6).
 
-```powershell
-git init
-git add .gitignore requirements.txt README.md task.md src notebooks results dataset
-git commit -m "Initial import: London price ML pipeline and frozen results bundle"
-```
-
-Create a **private** repository on GitHub, then:
+After cloning, add data, run the pipeline, commit refreshed `results/` after `--sync-results`.
 
 ```powershell
 git remote add origin https://github.com/<org>/<repo>.git

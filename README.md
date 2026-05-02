@@ -81,7 +81,7 @@ Re-running after dependency upgrades may shift metrics slightly; freeze mileston
 - **`.conda/`**, **`anaconda_projects/`** — ignored.  
 - **`results/`** — committed summaries for this milestone.
 
-Legacy Colab copies at repo root (`o_altă_copie_*`) are optional reference only.
+Legacy Colab EDA scripts (`o_altă_copie_*.py`) can stay on your machine for reference; they are gitignored and not part of the pipeline.
 
 ## GitHub (private)
 

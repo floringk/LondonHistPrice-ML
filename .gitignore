@@ -16,3 +16,6 @@ Untitled
 
 # Large raw data (see README for acquisition)
 dataset/*.csv
+
+# Local-only legacy Colab EDA copies (not committed)
+o_altă_copie_*.py

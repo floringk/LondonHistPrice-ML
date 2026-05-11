@@ -13,6 +13,7 @@ from london_pipeline import (
     load_dataset,
     run_model_comparison,
 )
+from regression_diagnostics import plot_loss_curve, write_regression_diagnostics
 
 
 def main() -> None:
@@ -51,7 +52,7 @@ def main() -> None:
     print(f"[run] Feature count={len(feature_cols)}", flush=True)
 
     print("[run] Running model comparison...", flush=True)
-    results_df, feature_imp_df, test_pred_df = run_model_comparison(
+    results_df, feature_imp_df, test_pred_df, loss_curves = run_model_comparison(
         split_data=split_data,
         preprocessor=preprocess,
         feature_cols=feature_cols,
@@ -73,6 +74,16 @@ def main() -> None:
     print(f"[run] Saved: {imp_path}", flush=True)
     test_pred_df.to_csv(pred_path, index=False)
     print(f"[run] Saved: {pred_path}", flush=True)
+    diag_paths = write_regression_diagnostics(data_dir, test_pred_df, results_df)
+    for key, path in diag_paths.items():
+        print(f"[run] diagnostics {key}: {path}", flush=True)
+    loss_curve_paths: dict[str, tuple[Path, Path]] = {}
+    for name, values in loss_curves.items():
+        if not values:
+            continue
+        csv_path, png_path = plot_loss_curve(name, values, data_dir)
+        loss_curve_paths[name] = (csv_path, png_path)
+        print(f"[run] loss curve {name}: {png_path}", flush=True)
     year_rmse_df.to_csv(year_path, index=False)
     print(f"[run] Saved: {year_path}", flush=True)
     segment_df.to_csv(segment_path, index=False)
@@ -90,6 +101,21 @@ def main() -> None:
             "test_predictions": str(pred_path),
             "test_rmse_by_year": str(year_path),
             "segment_metrics": str(segment_path),
+            "regression_pred_vs_actual": str(data_dir / "regression_pred_vs_actual.png"),
+            "regression_residuals": str(data_dir / "regression_residuals.png"),
+            "price_bin_confusion_csv": str(data_dir / "price_bin_confusion.csv"),
+            "price_bin_confusion_png": str(data_dir / "price_bin_confusion.png"),
+            "price_bin_edges": str(data_dir / "price_bin_edges.csv"),
+            "price_bin_classification_report": str(
+                data_dir / "price_bin_classification_report.csv"
+            ),
+            "price_bin_classification_summary": str(
+                data_dir / "price_bin_classification_summary.csv"
+            ),
+            "mlp_loss_curves": {
+                name: {"csv": str(csv_p), "png": str(png_p)}
+                for name, (csv_p, png_p) in loss_curve_paths.items()
+            },
         },
     }
     registry_path.write_text(json.dumps(registry, indent=2), encoding="utf-8")

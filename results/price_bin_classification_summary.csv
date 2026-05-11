@@ -1,0 +1,2 @@
+model,n_bins,accuracy,macro_f1,weighted_f1,support
+HistGBR,5,0.4951408688187866,0.4950267853724261,0.4965955360664132,130476

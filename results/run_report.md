@@ -6,13 +6,25 @@
 - Test RMSE: `393489.27`
 - Test MAE: `216082.64`
 - RMSE improvement vs naive: `57.58%`
+- Test R²: `0.7197`
+- Test MAPE: `0.3381`
+- Share of test rows with |y−ŷ|/|y| < 10% (|y|>100 GBP): `24.27%`
+- Price-bin accuracy (5 quantile bins, `HistGBR`): `49.51%`
+- Price-bin macro F1: `0.4950`
 
 ## Walk-Forward Stability
 
+### RandomForest
 - Folds: `4`
 - Mean RMSE: `347500.18`
 - RMSE std: `84774.58`
 - Coefficient of variation: `24.40%`
+
+### MLP
+- Folds: `4`
+- Mean RMSE: `356658.29`
+- RMSE std: `53909.12`
+- Coefficient of variation: `15.12%`
 
 ## External Estimate Benchmark
 

@@ -9,6 +9,31 @@
     "feature_importance": "C:\\Projects\\ML Model\\data\\feature_importance.csv",
     "test_predictions": "C:\\Projects\\ML Model\\data\\test_predictions.csv",
     "test_rmse_by_year": "C:\\Projects\\ML Model\\data\\test_rmse_by_year.csv",
-    "segment_metrics": "C:\\Projects\\ML Model\\data\\segment_metrics.csv"
+    "segment_metrics": "C:\\Projects\\ML Model\\data\\segment_metrics.csv",
+    "regression_pred_vs_actual": "C:\\Projects\\ML Model\\data\\regression_pred_vs_actual.png",
+    "regression_residuals": "C:\\Projects\\ML Model\\data\\regression_residuals.png",
+    "price_bin_confusion_csv": "C:\\Projects\\ML Model\\data\\price_bin_confusion.csv",
+    "price_bin_confusion_png": "C:\\Projects\\ML Model\\data\\price_bin_confusion.png",
+    "price_bin_edges": "C:\\Projects\\ML Model\\data\\price_bin_edges.csv",
+    "price_bin_classification_report": "C:\\Projects\\ML Model\\data\\price_bin_classification_report.csv",
+    "price_bin_classification_summary": "C:\\Projects\\ML Model\\data\\price_bin_classification_summary.csv",
+    "mlp_loss_curves": {
+      "MLP_small": {
+        "csv": "C:\\Projects\\ML Model\\data\\MLP_small_loss_curve.csv",
+        "png": "C:\\Projects\\ML Model\\data\\MLP_small_loss_curve.png"
+      },
+      "MLPRegressor": {
+        "csv": "C:\\Projects\\ML Model\\data\\MLPRegressor_loss_curve.csv",
+        "png": "C:\\Projects\\ML Model\\data\\MLPRegressor_loss_curve.png"
+      },
+      "MLP_medium": {
+        "csv": "C:\\Projects\\ML Model\\data\\MLP_medium_loss_curve.csv",
+        "png": "C:\\Projects\\ML Model\\data\\MLP_medium_loss_curve.png"
+      },
+      "MLP_large": {
+        "csv": "C:\\Projects\\ML Model\\data\\MLP_large_loss_curve.csv",
+        "png": "C:\\Projects\\ML Model\\data\\MLP_large_loss_curve.png"
+      }
+    }
   }
 }

@@ -63,6 +63,26 @@ def write_consolidated_report(root: Path) -> Path:
         lines.append(
             f"- RMSE improvement vs naive: `{best['test_rmse_improvement_vs_naive_pct']:.2f}%`"
         )
+        if "test_r2" in results_df.columns:
+            lines.append(f"- Test R²: `{float(best['test_r2']):.4f}`")
+        if "test_mape" in results_df.columns:
+            lines.append(f"- Test MAPE: `{float(best['test_mape']):.4f}`")
+        if "test_within_10pct_rate" in results_df.columns:
+            lines.append(
+                "- Share of test rows with |y−ŷ|/|y| < 10% (|y|>100 GBP): "
+                f"`{100 * float(best['test_within_10pct_rate']):.2f}%`"
+            )
+        bin_cls_path = data_dir / "price_bin_classification_summary.csv"
+        if bin_cls_path.is_file():
+            try:
+                bin_cls = pd.read_csv(bin_cls_path).iloc[0]
+                lines.append(
+                    f"- Price-bin accuracy ({int(bin_cls['n_bins'])} quantile bins, "
+                    f"`{bin_cls['model']}`): `{100 * float(bin_cls['accuracy']):.2f}%`"
+                )
+                lines.append(f"- Price-bin macro F1: `{float(bin_cls['macro_f1']):.4f}`")
+            except Exception as exc:  # noqa: BLE001
+                print(f"[main] Could not read bin classification summary: {exc}", flush=True)
         lines.append("")
     else:
         lines.append("## Baseline Summary")
@@ -71,17 +91,42 @@ def write_consolidated_report(root: Path) -> Path:
         lines.append("")
 
     if wf_df is not None and not wf_df.empty:
-        mean_rmse = float(wf_df["rmse"].mean())
-        std_rmse = float(wf_df["rmse"].std(ddof=0))
-        cv_pct = 100.0 * std_rmse / mean_rmse if mean_rmse else float("nan")
-        walkforward_cv = cv_pct
         lines.append("## Walk-Forward Stability")
         lines.append("")
-        lines.append(f"- Folds: `{len(wf_df)}`")
-        lines.append(f"- Mean RMSE: `{mean_rmse:.2f}`")
-        lines.append(f"- RMSE std: `{std_rmse:.2f}`")
-        lines.append(f"- Coefficient of variation: `{cv_pct:.2f}%`")
-        lines.append("")
+        if "model_family" in wf_df.columns:
+            families = list(dict.fromkeys(wf_df["model_family"].astype(str)))
+            for fam in families:
+                sub = wf_df[wf_df["model_family"] == fam]
+                mean_rmse = float(sub["rmse"].mean())
+                std_rmse = float(sub["rmse"].std(ddof=0))
+                cv_pct = 100.0 * std_rmse / mean_rmse if mean_rmse else float("nan")
+                lines.append(f"### {fam}")
+                lines.append(f"- Folds: `{len(sub)}`")
+                lines.append(f"- Mean RMSE: `{mean_rmse:.2f}`")
+                lines.append(f"- RMSE std: `{std_rmse:.2f}`")
+                lines.append(f"- Coefficient of variation: `{cv_pct:.2f}%`")
+                lines.append("")
+                if fam == "RandomForest":
+                    walkforward_cv = cv_pct
+            if walkforward_cv is None:
+                # Gate falls back to the first family if RF was absent.
+                first_fam = families[0]
+                sub = wf_df[wf_df["model_family"] == first_fam]
+                mean_rmse = float(sub["rmse"].mean())
+                std_rmse = float(sub["rmse"].std(ddof=0))
+                walkforward_cv = (
+                    100.0 * std_rmse / mean_rmse if mean_rmse else float("nan")
+                )
+        else:
+            mean_rmse = float(wf_df["rmse"].mean())
+            std_rmse = float(wf_df["rmse"].std(ddof=0))
+            cv_pct = 100.0 * std_rmse / mean_rmse if mean_rmse else float("nan")
+            walkforward_cv = cv_pct
+            lines.append(f"- Folds: `{len(wf_df)}`")
+            lines.append(f"- Mean RMSE: `{mean_rmse:.2f}`")
+            lines.append(f"- RMSE std: `{std_rmse:.2f}`")
+            lines.append(f"- Coefficient of variation: `{cv_pct:.2f}%`")
+            lines.append("")
     else:
         lines.append("## Walk-Forward Stability")
         lines.append("")
@@ -276,6 +321,19 @@ _FROZEN_ARTIFACT_NAMES = (
     "track_comparison_summary.csv",
     "segment_blocker_actions.csv",
     "experiment_registry.json",
+    "regression_pred_vs_actual.png",
+    "regression_residuals.png",
+    "price_bin_confusion.csv",
+    "price_bin_confusion.png",
+    "price_bin_edges.csv",
+    "price_bin_classification_report.csv",
+    "price_bin_classification_summary.csv",
+    "MLP_small_loss_curve.png",
+    "MLP_medium_loss_curve.png",
+    "MLP_large_loss_curve.png",
+    "MLPRegressor_loss_curve.png",
+    "torch_mlp_loss_curve.png",
+    "torch_mlp_history.csv",
 )
 
 
@@ -307,6 +365,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--walk-forward", action="store_true", help="Run walk-forward validation.")
     parser.add_argument("--benchmark", action="store_true", help="Run external benchmark.")
     parser.add_argument("--assisted", action="store_true", help="Run assisted track benchmark model.")
+    parser.add_argument(
+        "--torch-mlp",
+        action="store_true",
+        help="Train the PyTorch MLP baseline (appends row to model_results_summary.csv).",
+    )
     parser.add_argument("--report-only", action="store_true", help="Only write consolidated report.")
     parser.add_argument(
         "--sync-results",
@@ -324,13 +387,17 @@ def main() -> None:
     run_wf = args.all or args.walk_forward
     run_benchmark = args.all or args.benchmark
     run_assisted = args.all or args.assisted
+    run_torch_mlp = args.all or args.torch_mlp
     report_only = args.report_only
 
-    if not any([run_baseline, run_wf, run_benchmark, run_assisted, report_only]):
+    if not any(
+        [run_baseline, run_wf, run_benchmark, run_assisted, run_torch_mlp, report_only]
+    ):
         run_baseline = True
         run_wf = True
         run_benchmark = True
         run_assisted = True
+        run_torch_mlp = True
 
     if run_baseline:
         print("[main] Running baseline pipeline...", flush=True)
@@ -344,6 +411,16 @@ def main() -> None:
     if run_assisted:
         print("[main] Running assisted track...", flush=True)
         assisted_track.main()
+    if run_torch_mlp:
+        print("[main] Running PyTorch MLP baseline...", flush=True)
+        try:
+            import torch_mlp  # type: ignore[import-not-found]
+
+            torch_mlp.main()
+        except SystemExit as exc:
+            print(f"[main] torch_mlp skipped: {exc}", flush=True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[main] torch_mlp failed: {exc}", flush=True)
 
     report_path = write_consolidated_report(root)
     print(f"[main] Saved consolidated report: {report_path}", flush=True)

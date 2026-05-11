@@ -5,3 +5,7 @@ seaborn>=0.13
 scikit-learn>=1.3
 jupyter>=1.0
 kagglehub>=0.2
+# Optional: PyTorch baseline for src/torch_mlp.py (CPU wheel is fine on Windows).
+# Install separately if you only want the sklearn pipeline:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+torch>=2.2

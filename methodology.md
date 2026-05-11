@@ -108,7 +108,9 @@ Encoding:
 | Role | Implementation |
 |------|----------------|
 | Naive baseline | Predict test with **median** of training targets |
-| Mainline ML | `HistGradientBoostingRegressor`, `RandomForestRegressor` ([`run_model_comparison`](src/london_pipeline.py)) |
+| Mainline tree ML | `HistGradientBoostingRegressor`, `RandomForestRegressor` ([`run_model_comparison`](src/london_pipeline.py)) |
+| Mainline linear ML | `Ridge`, `ElasticNet` (same preprocessor, sparse OHE input) |
+| Mainline neural baselines | `MLP_small/medium/large` (sklearn `MLPRegressor` capacity scan, log-target via `TransformedTargetRegressor`), `TorchMLP` ([`src/torch_mlp.py`](src/torch_mlp.py)) |
 | Assisted ML | `AssistedHistGBR`, `AssistedRandomForest` ([`src/assisted_track.py`](src/assisted_track.py)) |
 
 **HistGBR** hyperparameters for mainline follow tuned settings documented in code (see bounded search in [`src/hparam_search.py`](src/hparam_search.py)).
@@ -116,6 +118,49 @@ Encoding:
 ### 6.2 Selection criterion
 
 Primary headline for model ranking on the holdout: **lowest test RMSE** among candidates, with validation metrics used for sanity checking and tuning experiments. Naive uplift is reported as **percentage reduction in test RMSE** relative to the naive median baseline (`model_results_summary.csv`).
+
+### 6.3 Neural network baselines
+
+Two NN baselines are reported on the **same calendar split** and **same preprocessor** as the trees, so the comparison is fair. After empirical iteration, the final configurations used in the committed snapshot are:
+
+**sklearn `MLPRegressor` capacity scan** (`MLP_small`, `MLP_medium`, `MLP_large`)
+- Architectures: `(64,)`, `(128, 64)`, `(256, 128, 64)`.
+- Activation `relu`, solver `adam` (`learning_rate_init=1e-3`), L2 `alpha=1e-4`.
+- Early stopping: `validation_fraction=0.15`, `n_iter_no_change=15`, `tol=1e-4`, `max_iter=200`, `batch_size=256`.
+- **Target scaler:** `TransformedTargetRegressor(transformer=StandardScaler())`. Rationale: a `log1p`/`expm1` wrap looks attractive for the heavy GBP tail but interacts badly with sklearn's internal early-stop signal — checkpoints selected on log-space R² systematically under-predict the shifted test era, and `expm1` then amplifies that bias multiplicatively (preliminary experiments hit test RMSE > 1 M GBP). A linear `StandardScaler` inverse is **bias-preserving**: errors in z-score space translate to errors in GBP at a fixed ratio, so the early-stop signal is honest.
+- Fixed `random_state=42`.
+
+**PyTorch `MLPNet`** ([`src/torch_mlp.py`](src/torch_mlp.py))
+- Architecture: `Linear(d, 256) → ReLU → Dropout(0.2) → Linear(256, 128) → ReLU → Dropout(0.2) → Linear(128, 1)`.
+- Optimiser `AdamW(lr=1e-3, weight_decay=1e-4)`, loss `SmoothL1Loss` (Huber-style robust loss), `batch_size=1024`, up to 80 epochs.
+- **Early stopping in GBP space**: validation RMSE is computed *after* the `expm1` inverse on every epoch and the best-by-GBP-RMSE checkpoint is restored (patience 10). This is the key reason the PyTorch MLP can use a log target safely while the sklearn MLP cannot — the early-stop signal lives in price units, not log units.
+- **Log target with two safety guards:**
+  1. The final `Linear(128, 1)` is initialised with `weight = 0` and `bias = mean(log1p(y_train))`, so epoch 0 predicts the training log-mean. Without this, random init can produce log values around 24, and `expm1(24) ≈ 26 billion` GBP — observed empirically on the first run.
+  2. Log predictions are clipped to `[log_min(y_train) − 0.5, log_max(y_train) + 0.5]` *before* `expm1`, bounding test-time predictions to a sensible GBP envelope and preventing tail explosions.
+- Fixed seed `42`.
+
+```mermaid
+flowchart LR
+  input["Input: 52 features (numeric scaled + OHE)"] --> h1[Linear 256 -> ReLU -> Dropout 0.2]
+  h1 --> h2[Linear 128 -> ReLU -> Dropout 0.2]
+  h2 --> out["Linear -> 1 (log price)"]
+  out --> clip["clip to [log_min-0.5, log_max+0.5]"]
+  clip --> inv[expm1]
+  inv --> y["y_hat in GBP"]
+```
+
+Why NNs are still reported, even though trees usually win on this data:
+
+- **Course alignment:** the cohort expects an explicit NN with a loss curve, an architecture, and a training loop.
+- **Theoretical context:** universal approximation (Hornik et al., 1989) guarantees representability but **not** sample efficiency on heterogeneous tabular features.
+- **Empirical literature:** tree ensembles tend to outperform deep nets on medium-sized heterogeneous tabular datasets (Shwartz-Ziv & Armon, 2022; Grinsztajn et al., 2022). The observed ordering is consistent with that literature.
+- **Walk-forward provides a positive NN finding:** the sklearn MLP has *lower* coefficient of variation across calendar folds than RandomForest (15.1% vs 24.4%) and wins 2 of 4 folds, so on shorter shift windows the NN is competitive.
+
+Loss curves are persisted as `data/MLP_*_loss_curve.{csv,png}` and `data/torch_mlp_loss_curve.png` (mirrored under [`results/`](results/) after `--sync-results`). PyTorch per-epoch history (`epoch`, `train_loss`, `val_rmse`) is at `data/torch_mlp_history.csv`.
+
+### 6.4 Linear baselines (Ridge, ElasticNet)
+
+`Ridge(alpha=1.0)` and `ElasticNet(alpha=0.001, l1_ratio=0.2)` consume the same sparse preprocessor output. They give the table an honest linear reference so the boosting-vs-NN-vs-linear ordering is visible in `model_results_summary.csv`.
 
 ---
 
@@ -133,13 +178,31 @@ For test observations with true values \(y_i\) and predictions \(\hat{y}_i\), \(
 
 Both are in **the same currency units** as `history_price`. RMSE penalises large errors more heavily than MAE (important for **tail prices**).
 
+### 7.1 Regression-friendly “accuracy” surrogates
+
+Because the target is continuous, classification **accuracy** does not apply directly. The pipeline therefore reports:
+
+- **\(R^2\)** — fraction of variance explained.
+- **MAPE** — mean of \(\lvert (y - \hat y)/y\rvert\) on rows with \(\lvert y \rvert > 100\) GBP (avoids the divide-by-near-zero pathology).
+- **Within-10% rate** — share of rows with relative error below \(10\%\) (same support filter as MAPE).
+
+### 7.2 Derived classification view on price bins
+
+For audiences that explicitly want an accuracy percentage, [`src/regression_diagnostics.py`](src/regression_diagnostics.py) discretises both `y_true` and the predictions of the best model into **five quantile bins** (of `y_true`) and writes:
+
+- `price_bin_confusion.csv` / `.png` — the 5×5 confusion matrix.
+- `price_bin_classification_report.csv` — per-bin precision/recall/F1/support.
+- `price_bin_classification_summary.csv` — overall **accuracy**, **macro F1**, **weighted F1**.
+
+This is a derived proxy task; the regression metrics above remain the primary signal.
+
 ---
 
 ## 8. Extended evaluation protocol
 
 ### 8.1 Walk-forward stability
 
-[`src/walk_forward_validation.py`](src/walk_forward_validation.py) trains a **RandomForest** on expanding/rolling past windows and reports RMSE on forward windows. Summarise **mean RMSE**, **std**, and **coefficient of variation (CV%)** across folds in `walk_forward_results.csv` (see [`results/walk_forward_results.csv`](results/walk_forward_results.csv)).
+[`src/walk_forward_validation.py`](src/walk_forward_validation.py) trains **both a RandomForest and an MLP (`MLP_medium`, log-target)** on expanding/rolling past windows and reports RMSE on forward windows for each family. `walk_forward_results.csv` has columns `fold, model_family, train_rows, val_rows, rmse, rmse_mean, rmse_std, cv_pct`; the consolidated report ([`results/run_report.md`](results/run_report.md)) prints mean RMSE and CV% **per family**. The release gate (Section 9) is evaluated on the **RandomForest** family for continuity with prior snapshots.
 
 ### 8.2 Segment-level error
 
@@ -232,6 +295,12 @@ Dependencies: [`requirements.txt`](requirements.txt). Python **3.11+** recommend
 ## 13. References (abbreviated)
 
 See [task.md § Literature review](task.md#literature-review) for the full mapping table and citations: Bergmeir & Benítez (2012), Cerqueira et al. (2020), Kaufman et al. (2012), Hastie et al. (2009), Breiman (2001), Willmott & Matsuura (2005).
+
+Additional references introduced for the NN baselines (Section 6.3):
+
+- Hornik, K., Stinchcombe, M., White, H. (1989). *Multilayer feedforward networks are universal approximators.* **Neural Networks**, 2(5), 359–366.
+- Shwartz-Ziv, R., Armon, A. (2022). *Tabular data: Deep learning is not all you need.* **Information Fusion**, 81, 84–90.
+- Grinsztajn, L., Oyallon, E., Varoquaux, G. (2022). *Why do tree-based models still outperform deep learning on typical tabular data?* **NeurIPS 2022 Datasets and Benchmarks Track**.
 
 ---
 

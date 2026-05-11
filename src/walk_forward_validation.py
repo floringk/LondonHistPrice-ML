@@ -4,12 +4,14 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from scipy.sparse import issparse
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error
 
 from london_pipeline import (
-    TARGET_COL,
     DATE_COL,
+    TARGET_COL,
+    _make_log_target_mlp,
     build_preprocessor,
     clean_dataset,
     default_dataset_path,
@@ -34,6 +36,22 @@ def build_time_folds(df: pd.DataFrame, n_folds: int = 4) -> list[tuple[pd.Series
     return folds
 
 
+def _rf() -> RandomForestRegressor:
+    return RandomForestRegressor(
+        n_estimators=350,
+        max_depth=24,
+        min_samples_leaf=3,
+        random_state=42,
+        n_jobs=-1,
+    )
+
+
+def _densify(X) -> np.ndarray:
+    if issparse(X):
+        return X.toarray().astype(np.float32, copy=False)
+    return np.asarray(X, dtype=np.float32)
+
+
 def main() -> None:
     root = Path(__file__).resolve().parents[1]
     data_dir = root / "data"
@@ -48,9 +66,14 @@ def main() -> None:
     preprocess, feature_cols = build_preprocessor(clean)
     print(f"[walk-forward] Feature count={len(feature_cols)}", flush=True)
 
-    rows = []
+    families: tuple[str, ...] = ("RandomForest", "MLP")
+
+    rows: list[dict] = []
     folds = build_time_folds(clean, n_folds=4)
-    print(f"[walk-forward] Total folds={len(folds)}", flush=True)
+    print(
+        f"[walk-forward] Total folds={len(folds)} families={list(families)}",
+        flush=True,
+    )
     for i, (train_m, val_m, fold_name) in enumerate(folds, start=1):
         train_df = clean.loc[train_m].copy()
         val_df = clean.loc[val_m].copy()
@@ -71,32 +94,47 @@ def main() -> None:
         X_train_t = preprocess.fit_transform(X_train)
         X_val_t = preprocess.transform(X_val)
 
-        model = RandomForestRegressor(
-            n_estimators=350,
-            max_depth=24,
-            min_samples_leaf=3,
-            random_state=42,
-            n_jobs=-1,
-        )
-        model.fit(X_train_t, y_train)
-        pred = model.predict(X_val_t)
-        rmse = float(np.sqrt(mean_squared_error(y_val, pred)))
-        print(f"[walk-forward] {fold_name} RMSE={rmse:,.2f}", flush=True)
-        rows.append(
-            {
-                "fold": fold_name,
-                "train_rows": int(len(train_df)),
-                "val_rows": int(len(val_df)),
-                "rmse": rmse,
-            }
-        )
+        for family in families:
+            try:
+                if family == "RandomForest":
+                    model = _rf()
+                    model.fit(X_train_t, y_train)
+                    pred = model.predict(X_val_t)
+                elif family == "MLP":
+                    model = _make_log_target_mlp((128, 64))
+                    model.fit(_densify(X_train_t), y_train)
+                    pred = model.predict(_densify(X_val_t))
+                else:
+                    continue
+                rmse = float(np.sqrt(mean_squared_error(y_val, pred)))
+                print(
+                    f"[walk-forward] {fold_name} {family} RMSE={rmse:,.2f}",
+                    flush=True,
+                )
+                rows.append(
+                    {
+                        "fold": fold_name,
+                        "model_family": family,
+                        "train_rows": int(len(train_df)),
+                        "val_rows": int(len(val_df)),
+                        "rmse": rmse,
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001
+                print(f"[walk-forward] {fold_name} {family} skipped: {exc}", flush=True)
 
     wf_df = pd.DataFrame(rows)
     if wf_df.empty:
         raise RuntimeError("No valid walk-forward folds produced.")
-    wf_df["rmse_mean"] = wf_df["rmse"].mean()
-    wf_df["rmse_std"] = wf_df["rmse"].std(ddof=0)
-    wf_df["cv_pct"] = 100.0 * wf_df["rmse_std"] / wf_df["rmse_mean"]
+    # Per-family aggregates as additional columns so existing readers still see the columns
+    # mean/std/CV; values now repeat the per-family aggregate for every row of that family.
+    aggregates = (
+        wf_df.groupby("model_family")["rmse"]
+        .agg(rmse_mean="mean", rmse_std=lambda s: float(s.std(ddof=0)))
+        .reset_index()
+    )
+    aggregates["cv_pct"] = 100.0 * aggregates["rmse_std"] / aggregates["rmse_mean"]
+    wf_df = wf_df.merge(aggregates, on="model_family", how="left")
 
     output = data_dir / "walk_forward_results.csv"
     wf_df.to_csv(output, index=False)
@@ -106,4 +144,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

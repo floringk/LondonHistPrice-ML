@@ -7,11 +7,14 @@ from typing import Iterable
 
 import numpy as np
 import pandas as pd
-from sklearn.compose import ColumnTransformer
+from scipy.sparse import issparse
+from sklearn.compose import ColumnTransformer, TransformedTargetRegressor
 from sklearn.ensemble import HistGradientBoostingRegressor, RandomForestRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.inspection import permutation_importance
-from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.linear_model import ElasticNet, Ridge
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.neural_network import MLPRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
@@ -183,13 +186,127 @@ def build_preprocessor(clean: pd.DataFrame) -> tuple[ColumnTransformer, list[str
     return preprocess, feature_cols
 
 
+def _extra_regression_metrics(
+    y_true: np.ndarray, y_pred: np.ndarray, eps: float = 100.0
+) -> dict[str, float]:
+    """R² plus MAPE and share with relative error < 10% on rows with |y| > eps (GBP scale)."""
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    r2 = float(r2_score(y_true, y_pred))
+    mask = np.abs(y_true) > eps
+    if not np.any(mask):
+        return {"r2": r2, "mape": float("nan"), "within_10pct_rate": float("nan")}
+    rel = np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])
+    return {
+        "r2": r2,
+        "mape": float(np.mean(rel)),
+        "within_10pct_rate": float(np.mean(rel < 0.10)),
+    }
+
+
+def _predict_in_batches(model, X, batch_size: int = 4096) -> np.ndarray:
+    n = X.shape[0]
+    out = np.empty(n, dtype=float)
+    for i in range(0, n, batch_size):
+        sl = slice(i, min(i + batch_size, n))
+        block = X[sl]
+        if issparse(block):
+            block = block.toarray()
+        out[sl] = model.predict(block)
+    return out
+
+
+def _densify(X) -> np.ndarray:
+    """Return a dense float32 ndarray for MLP/torch consumption."""
+    if issparse(X):
+        return X.toarray().astype(np.float32, copy=False)
+    return np.asarray(X, dtype=np.float32)
+
+
+MLP_ARCHITECTURES: tuple[tuple[str, tuple[int, ...]], ...] = (
+    ("MLP_small", (64,)),
+    ("MLP_medium", (128, 64)),
+    ("MLP_large", (256, 128, 64)),
+)
+
+
+def _make_mlp(
+    hidden_layer_sizes: tuple[int, ...],
+    random_state: int = 42,
+    target_scaler: str = "standard",
+) -> TransformedTargetRegressor | MLPRegressor:
+    """Build an MLP for the London price task.
+
+    `target_scaler` options:
+    - ``"standard"`` (default): wrap in `TransformedTargetRegressor(transformer=StandardScaler())`.
+      The MLP trains on a zero-mean unit-variance target — Adam converges in normal time
+      and early-stopping tolerances fire correctly. The inverse transform is *linear*, so
+      errors are not amplified asymmetrically (unlike `expm1`).
+    - ``"log"``: wrap in `TransformedTargetRegressor(log1p, expm1)`. With this dataset's
+      calendar shift, the checkpoint selected on log-space MSE systematically
+      under-predicts test rows and `expm1` amplifies that bias. Available but not used
+      in the sklearn scan; the PyTorch MLP uses log target because its early-stop signal
+      lives in GBP space and so picks the right checkpoint.
+    - ``"none"``: raw GBP target. Convergence is very slow (huge gradients on the
+      ~10^11 MSE scale); kept only for ablation studies.
+    """
+    base = MLPRegressor(
+        hidden_layer_sizes=hidden_layer_sizes,
+        activation="relu",
+        solver="adam",
+        alpha=1e-4,
+        learning_rate_init=1e-3,
+        max_iter=200,
+        early_stopping=True,
+        validation_fraction=0.15,
+        n_iter_no_change=15,
+        batch_size=256,
+        tol=1e-4,
+        random_state=random_state,
+    )
+    if target_scaler == "standard":
+        return TransformedTargetRegressor(regressor=base, transformer=StandardScaler())
+    if target_scaler == "log":
+        return TransformedTargetRegressor(regressor=base, func=np.log1p, inverse_func=np.expm1)
+    return base
+
+
+# Back-compat alias used by walk_forward_validation.
+_make_log_target_mlp = _make_mlp
+
+
+def _mlp_allowed(feature_dim: int, max_dim: int = 2200) -> bool:
+    if feature_dim > max_dim:
+        print(
+            f"[pipeline] Skipping MLP capacity scan because feature_dim={feature_dim} > {max_dim}.",
+            flush=True,
+        )
+        return False
+    return True
+
+
+def _extract_loss_curve(model) -> list[float] | None:
+    """Return MLP training loss curve regardless of TransformedTargetRegressor wrap."""
+    inner = getattr(model, "regressor_", model)
+    curve = getattr(inner, "loss_curve_", None)
+    if curve is None:
+        return None
+    return [float(v) for v in curve]
+
+
 def metrics_frame(rows: Iterable[dict]) -> pd.DataFrame:
     cols = [
         "model",
         "val_mae",
         "val_rmse",
+        "val_r2",
+        "val_mape",
+        "val_within_10pct_rate",
         "test_mae",
         "test_rmse",
+        "test_r2",
+        "test_mape",
+        "test_within_10pct_rate",
         "test_rmse_improvement_vs_naive_pct",
     ]
     return pd.DataFrame(rows)[cols].sort_values("test_rmse").reset_index(drop=True)
@@ -199,7 +316,7 @@ def run_model_comparison(
     split_data: SplitData,
     preprocessor: ColumnTransformer,
     feature_cols: list[str],
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[str, list[float]]]:
     print("[pipeline] Preparing train/val/test matrices...", flush=True)
     X_train = split_data.train[feature_cols]
     y_train = split_data.train[TARGET_COL].to_numpy()
@@ -219,6 +336,8 @@ def run_model_comparison(
     naive_pred_val = np.full_like(y_val, np.median(y_train), dtype=float)
     naive_pred_test = np.full_like(y_test, np.median(y_train), dtype=float)
     naive_rmse_test = np.sqrt(mean_squared_error(y_test, naive_pred_test))
+    naive_ex_val = _extra_regression_metrics(y_val, naive_pred_val)
+    naive_ex_test = _extra_regression_metrics(y_test, naive_pred_test)
 
     candidates = [
         (
@@ -242,6 +361,14 @@ def run_model_comparison(
                 random_state=42,
             ),
         ),
+        (
+            "Ridge",
+            Ridge(alpha=1.0, random_state=42),
+        ),
+        (
+            "ElasticNet",
+            ElasticNet(alpha=0.001, l1_ratio=0.2, random_state=42, max_iter=2000),
+        ),
     ]
 
     results = [
@@ -249,8 +376,14 @@ def run_model_comparison(
             "model": "NaiveMedian",
             "val_mae": mean_absolute_error(y_val, naive_pred_val),
             "val_rmse": np.sqrt(mean_squared_error(y_val, naive_pred_val)),
+            "val_r2": naive_ex_val["r2"],
+            "val_mape": naive_ex_val["mape"],
+            "val_within_10pct_rate": naive_ex_val["within_10pct_rate"],
             "test_mae": mean_absolute_error(y_test, naive_pred_test),
             "test_rmse": naive_rmse_test,
+            "test_r2": naive_ex_test["r2"],
+            "test_mape": naive_ex_test["mape"],
+            "test_within_10pct_rate": naive_ex_test["within_10pct_rate"],
             "test_rmse_improvement_vs_naive_pct": 0.0,
         }
     ]
@@ -281,13 +414,21 @@ def run_model_comparison(
         pred_test = model.predict(X_test_t)
         rmse_test = np.sqrt(mean_squared_error(y_test, pred_test))
         print(f"[pipeline] {model_name} test RMSE={rmse_test:,.2f}", flush=True)
+        ex_val = _extra_regression_metrics(y_val, pred_val)
+        ex_test = _extra_regression_metrics(y_test, pred_test)
         results.append(
             {
                 "model": model_name,
                 "val_mae": mean_absolute_error(y_val, pred_val),
                 "val_rmse": np.sqrt(mean_squared_error(y_val, pred_val)),
+                "val_r2": ex_val["r2"],
+                "val_mape": ex_val["mape"],
+                "val_within_10pct_rate": ex_val["within_10pct_rate"],
                 "test_mae": mean_absolute_error(y_test, pred_test),
                 "test_rmse": rmse_test,
+                "test_r2": ex_test["r2"],
+                "test_mape": ex_test["mape"],
+                "test_within_10pct_rate": ex_test["within_10pct_rate"],
                 "test_rmse_improvement_vs_naive_pct": 100.0 * (1.0 - (rmse_test / naive_rmse_test)),
             }
         )
@@ -307,13 +448,13 @@ def run_model_comparison(
 
             # Small sampled permutation importance for stability diagnostics.
             print("[pipeline] Running permutation importance sample...", flush=True)
-            n = min(12000, X_val_t.shape[0])
+            n = min(4000, X_val_t.shape[0])
             sample_idx = np.linspace(0, X_val_t.shape[0] - 1, num=n, dtype=int)
             perm = permutation_importance(
                 model,
                 X_val_t[sample_idx],
                 y_val[sample_idx],
-                n_repeats=4,
+                n_repeats=2,
                 random_state=42,
                 n_jobs=-1,
                 scoring="neg_root_mean_squared_error",
@@ -328,13 +469,88 @@ def run_model_comparison(
             feature_importance_rows.append(perm_imp)
             print("[pipeline] Permutation importance completed.", flush=True)
 
-    results_df = metrics_frame(results)
+    loss_curves: dict[str, list[float]] = {}
+    if _mlp_allowed(X_train_t.shape[1]):
+        X_train_dense = _densify(X_train_t)
+        X_val_dense = _densify(X_val_t)
+        X_test_dense = _densify(X_test_t)
+        print(
+            f"[pipeline] Dense MLP matrices: "
+            f"train={X_train_dense.shape} val={X_val_dense.shape} test={X_test_dense.shape}",
+            flush=True,
+        )
+        best_mlp_rmse = float("inf")
+        for arch_name, hidden in MLP_ARCHITECTURES:
+            try:
+                print(
+                    f"[pipeline] Training {arch_name} hidden={hidden} (standardised target, full train)...",
+                    flush=True,
+                )
+                t0 = time.perf_counter()
+                mlp = _make_mlp(hidden, target_scaler="standard")
+                mlp.fit(X_train_dense, y_train)
+                fit_secs = time.perf_counter() - t0
+                pred_val = mlp.predict(X_val_dense)
+                pred_test = mlp.predict(X_test_dense)
+                rmse_test = float(np.sqrt(mean_squared_error(y_test, pred_test)))
+                print(
+                    f"[pipeline] {arch_name} fit completed in {fit_secs:.1f}s "
+                    f"test RMSE={rmse_test:,.2f}",
+                    flush=True,
+                )
+                ex_val = _extra_regression_metrics(y_val, pred_val)
+                ex_test = _extra_regression_metrics(y_test, pred_test)
+                results.append(
+                    {
+                        "model": arch_name,
+                        "val_mae": mean_absolute_error(y_val, pred_val),
+                        "val_rmse": np.sqrt(mean_squared_error(y_val, pred_val)),
+                        "val_r2": ex_val["r2"],
+                        "val_mape": ex_val["mape"],
+                        "val_within_10pct_rate": ex_val["within_10pct_rate"],
+                        "test_mae": mean_absolute_error(y_test, pred_test),
+                        "test_rmse": rmse_test,
+                        "test_r2": ex_test["r2"],
+                        "test_mape": ex_test["mape"],
+                        "test_within_10pct_rate": ex_test["within_10pct_rate"],
+                        "test_rmse_improvement_vs_naive_pct": 100.0 * (1.0 - (rmse_test / naive_rmse_test)),
+                    }
+                )
+                test_predictions[f"pred_{arch_name}"] = pred_test
+                curve = _extract_loss_curve(mlp)
+                if curve is not None:
+                    loss_curves[arch_name] = curve
+                if rmse_test < best_mlp_rmse:
+                    best_mlp_rmse = rmse_test
+                    test_predictions["pred_MLPRegressor"] = pred_test
+                    # Track the current best for a single mirror row added after the scan.
+                    best_mlp_row = dict(results[-1])
+                    best_mlp_row["model"] = "MLPRegressor"
+                    if curve is not None:
+                        loss_curves["MLPRegressor"] = curve
+            except Exception as exc:
+                print(f"[pipeline] {arch_name} skipped: {exc}", flush=True)
+
+        if "best_mlp_row" in locals():
+            # Single mirror of the best capacity, named "MLPRegressor" for downstream tools.
+            results.append(best_mlp_row)
+
+    # Dedupe: keep first occurrence per model name (covers re-runs / mirror rows).
+    seen: set[str] = set()
+    deduped_results: list[dict] = []
+    for r in results:
+        name = str(r.get("model", ""))
+        if name in seen:
+            continue
+        seen.add(name)
+        deduped_results.append(r)
+    results_df = metrics_frame(deduped_results)
     feature_importance = (
         pd.concat(feature_importance_rows, ignore_index=True)
         if feature_importance_rows
         else pd.DataFrame(columns=["feature", "importance", "source"])
     )
-    return results_df, feature_importance, test_predictions
+    return results_df, feature_importance, test_predictions, loss_curves
 
 
 def error_by_year_bucket(test_predictions: pd.DataFrame) -> pd.DataFrame:

@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>London AVM — Trees vs. Neural Networks</title>
+<style>
+  @page { size: 1280px 720px; margin: 0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #0f172a; color: #e2e8f0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .page {
+    width: 1280px; height: 720px;
+    page-break-after: always; break-after: page;
+    padding: 48px 64px;
+    display: flex; flex-direction: column;
+    background: radial-gradient(ellipse at top, #1e293b 0%, #0f172a 60%);
+    position: relative;
+  }
+  .page:last-child { page-break-after: auto; }
+  .card {
+    flex: 1;
+    background: #172033;
+    border: 1px solid #334155;
+    border-radius: 18px;
+    padding: 36px 48px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+    display: flex; flex-direction: column; gap: 18px;
+    overflow: hidden;
+  }
+  h1 { font-size: 2rem; margin: 0 0 6px; letter-spacing: -0.02em; line-height: 1.15; }
+  .subtitle { color: #94a3b8; margin: 0; font-size: 1.05rem; }
+
+  /* Title slide */
+  .title-card { align-items: center; justify-content: center; text-align: center; }
+  .eyebrow { text-transform: uppercase; letter-spacing: 0.25em; font-size: 0.85rem; color: #60a5fa; font-weight: 600; }
+  .title-main { font-size: 2.2rem; line-height: 1.2; margin: 16px 0 8px; max-width: 1000px; letter-spacing: -0.02em; }
+  .title-sub { font-size: 1.4rem; font-weight: 500; color: #94a3b8; margin: 0 0 28px; }
+  .title-tag { font-size: 1.15rem; color: #3b82f6; font-weight: 600; padding: 12px 24px;
+    border: 1px solid #3b82f6; border-radius: 999px; background: rgba(59,130,246,0.08); }
+  .title-ctx { margin-top: 28px; color: #94a3b8; font-size: 0.95rem; letter-spacing: 0.05em; }
+
+  /* Bullets */
+  ul.bullets { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+  ul.bullets li { display: flex; gap: 14px; align-items: flex-start; font-size: 1.05rem;
+    padding: 10px 14px; border-radius: 8px; border: 1px solid transparent;
+    background: rgba(255,255,255,0.02); }
+  ul.bullets li.hl { background: rgba(59,130,246,0.12); border-color: #3b82f6; }
+  .marker { color: #3b82f6; line-height: 1.6; }
+
+  /* Callout */
+  .callout { padding: 14px 20px; background: rgba(16,185,129,0.12); border-left: 4px solid #10b981;
+    border-radius: 8px; font-size: 1.05rem; font-weight: 500; }
+  .callout-lg { font-size: 1.35rem; font-weight: 700; text-align: center;
+    background: rgba(59,130,246,0.15); border: 1px solid #3b82f6; border-left-width: 4px;
+    color: #60a5fa; padding: 16px 24px; border-radius: 8px; }
+  .foot { color: #94a3b8; font-size: 0.85rem; font-style: italic; }
+
+  /* Table */
+  table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 1rem;
+    background: rgba(255,255,255,0.02); border-radius: 10px; overflow: hidden; border: 1px solid #334155; }
+  th, td { padding: 11px 16px; text-align: left; border-bottom: 1px solid #334155; }
+  th { background: rgba(59,130,246,0.1); color: #60a5fa; font-size: 0.85rem;
+    letter-spacing: 0.04em; text-transform: uppercase; }
+  tr:last-child td { border-bottom: none; }
+  tr.winner td { background: rgba(59,130,246,0.12); color: #60a5fa; font-weight: 700; }
+  tr.winner td:first-child { border-left: 4px solid #3b82f6; }
+
+  .subtable { padding: 12px 18px; background: rgba(255,255,255,0.03);
+    border-radius: 10px; border: 1px dashed #334155; }
+  .subtable-lbl { color: #94a3b8; text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.75rem; margin-bottom: 6px; }
+  .subtable-row { display: flex; gap: 28px; }
+  .sc-k { color: #94a3b8; font-size: 0.85rem; display: block; }
+  .sc-v { font-size: 1.5rem; font-weight: 700; color: #60a5fa; }
+
+  /* Dual */
+  .dual { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; flex: 1; }
+  .dual-col { padding: 18px 22px; border-radius: 12px; border: 1px solid #334155;
+    background: rgba(255,255,255,0.02); }
+  .dual-col h2 { margin: 0 0 10px; font-size: 1.15rem; }
+  .dual-col ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 9px; font-size: 0.98rem; }
+  .pos { border-left: 4px solid #10b981; }
+  .pos h2 { color: #10b981; }
+  .neg { border-left: 4px solid #f59e0b; }
+  .neg h2 { color: #f59e0b; }
+
+  /* Conclusion */
+  ol.conclusions { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+  ol.conclusions li { display: flex; gap: 16px; align-items: flex-start;
+    padding: 12px 18px; background: rgba(59,130,246,0.06); border-left: 4px solid #3b82f6;
+    border-radius: 10px; font-size: 1rem; }
+  .tag { background: #3b82f6; color: white; padding: 3px 10px; border-radius: 999px;
+    font-weight: 700; font-size: 0.8rem; min-width: 48px; text-align: center; flex-shrink: 0; }
+  .final { margin-top: 14px; text-align: center; font-size: 1.35rem; font-weight: 600; color: #60a5fa; letter-spacing: 0.05em; }
+
+  .page-num { position: absolute; bottom: 16px; right: 24px; color: #475569; font-size: 0.8rem; letter-spacing: 0.05em; }
+</style>
+</head>
+<body>
+
+<!-- Slide 1 -->
+<div class="page"><div class="card title-card">
+  <div class="eyebrow">London Housing AVM</div>
+  <div class="title-main">Automated Valuation Models for London Residential Real Estate (1995–2024)</div>
+  <div class="title-sub">Trees vs. Neural Networks under Temporal Shift</div>
+  <div class="title-tag">418,201 transactions · 29 years · 4 model families</div>
+  <div class="title-ctx">Neural Networks Course Project · FABIZ-ASE · 2026</div>
+</div><div class="page-num">1 / 10</div></div>
+
+<!-- Slide 2 -->
+<div class="page"><div class="card">
+  <header><h1>The Problem &amp; Why It Matters</h1><p class="subtitle">Motivation</p></header>
+  <ul class="bullets">
+    <li><span class="marker">●</span><span>London — the most volatile residential market in the UK, with direct macro-economic impact</span></li>
+    <li><span class="marker">●</span><span>Price-to-income: ~4× (1995) → &gt;10× (2006) → GFC → COVID "space race" → high rates 2022–2024</span></li>
+    <li class="hl"><span class="marker">●</span><span><strong>AVMs (Automated Valuation Models)</strong> = scalable, objective, real-time valuation</span></li>
+    <li><span class="marker">●</span><span>Central challenge: <strong>data leakage</strong> — saleEstimate_* / rentEstimate_* columns excluded from training</span></li>
+    <li><span class="marker">●</span><span>Target: <code>history_price</code> (continuous GBP, heavy-tailed log-normal distribution)</span></li>
+  </ul>
+</div><div class="page-num">2 / 10</div></div>
+
+<!-- Slide 3 -->
+<div class="page"><div class="card">
+  <header><h1>Dataset &amp; Temporal Split</h1><p class="subtitle">Calendar-elapsed split, not row-count</p></header>
+  <table>
+    <thead><tr><th>Set</th><th>Period</th><th>Rows (approx)</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Train</strong></td><td>1995-01-02 → 2015-03-04 (70% calendar)</td><td>~185k</td></tr>
+      <tr><td><strong>Validation</strong></td><td>2015-03-04 → 2018-04-13 (10% calendar)</td><td>~53k</td></tr>
+      <tr class="winner"><td><strong>Test</strong></td><td>2018-04-13 → 2024-09-27 (20% calendar)</td><td>~130k</td></tr>
+    </tbody>
+  </table>
+  <div class="callout">418,201 raw rows → 102,527 exact duplicates removed → quantile clipping (1%–99%) selected on validation</div>
+  <div class="foot">All preprocessing (imputation, scaling, OHE) fit exclusively on train — applied blind to val/test.</div>
+</div><div class="page-num">3 / 10</div></div>
+
+<!-- Slide 4 -->
+<div class="page"><div class="card">
+  <header><h1>Model Families Compared</h1><p class="subtitle">Same preprocessor · same split · same evaluation matrix</p></header>
+  <table>
+    <thead><tr><th>Family</th><th>Architecture</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Baseline</strong></td><td>NaiveMedian (zero-intelligence reference)</td></tr>
+      <tr><td><strong>Linear</strong></td><td>Ridge, ElasticNet</td></tr>
+      <tr><td><strong>Tree Ensemble</strong></td><td>HistGradientBoostingRegressor, RandomForestRegressor</td></tr>
+      <tr><td><strong>NN sklearn</strong></td><td>MLPRegressor (small / medium / large capacity scan)</td></tr>
+      <tr><td><strong>NN PyTorch</strong></td><td>MLPNet custom (dropout 0.2, AdamW, SmoothL1, log-target + bias init)</td></tr>
+    </tbody>
+  </table>
+  <div class="callout">Same evaluation matrix across all models — absolute fairness</div>
+</div><div class="page-num">4 / 10</div></div>
+
+<!-- Slide 5 -->
+<div class="page"><div class="card">
+  <header><h1>Main Results — Static Holdout (Test 2018–2024)</h1><p class="subtitle">The impact slide</p></header>
+  <table>
+    <thead><tr><th>Model</th><th>Test RMSE (£)</th><th>Test MAE (£)</th><th>R²</th></tr></thead>
+    <tbody>
+      <tr class="winner"><td><strong>HistGBR ✓</strong></td><td>393,489</td><td>216,083</td><td>0.720</td></tr>
+      <tr><td>RandomForest</td><td>396,947</td><td>215,149</td><td>~0.715</td></tr>
+      <tr><td>Ridge</td><td>562,968</td><td>—</td><td>—</td></tr>
+      <tr><td>MLP_medium (sklearn)</td><td>645,104</td><td>—</td><td>—</td></tr>
+      <tr><td>TorchMLP (PyTorch)</td><td>729,943</td><td>—</td><td>—</td></tr>
+      <tr><td>NaiveMedian</td><td>927,646</td><td>561,899</td><td>—</td></tr>
+    </tbody>
+  </table>
+  <div class="callout-lg">HistGBR: 57.6% RMSE reduction vs NaiveMedian</div>
+  <div class="subtable">
+    <div class="subtable-lbl">5-quantile bin classification (non-technical proxy)</div>
+    <div class="subtable-row">
+      <div><span class="sc-k">Price-bin Accuracy</span><span class="sc-v">49.51%</span></div>
+      <div><span class="sc-k">Macro F1</span><span class="sc-v">0.495</span></div>
+    </div>
+  </div>
+</div><div class="page-num">5 / 10</div></div>
+
+<!-- Slide 6 -->
+<div class="page"><div class="card">
+  <header><h1>Why Trees Win on Static Holdout</h1><p class="subtitle">Literature confirms our findings — Grinsztajn et al. 2022 · Shwartz-Ziv &amp; Armon 2022</p></header>
+  <ul class="bullets">
+    <li class="hl"><span class="marker">①</span><span><strong>Robustness to uninformative features</strong> — tree splits ignore noise columns; NNs do not</span></li>
+    <li class="hl"><span class="marker">②</span><span><strong>Discontinuous boundaries</strong> — property prices have hard edges (postcode, catchment, taxes) → NN spectral bias hurts</span></li>
+    <li class="hl"><span class="marker">③</span><span><strong>No scaling requirements</strong> — trees are invariant to monotone transforms; NNs need precise preprocessing</span></li>
+  </ul>
+  <div class="callout">On a single-shot holdout with large calendar shift (1995→2024), boosting clearly beats NNs</div>
+</div><div class="page-num">6 / 10</div></div>
+
+<!-- Slide 7 -->
+<div class="page"><div class="card">
+  <header><h1>Walk-Forward Validation — Where NNs Fight Back</h1><p class="subtitle">4 calendar folds, expanding window (2000→2006→2012→2018→2024)</p></header>
+  <table>
+    <thead><tr><th>Metric</th><th>RandomForest</th><th>MLP (sklearn)</th></tr></thead>
+    <tbody>
+      <tr><td>Mean RMSE</td><td>347,500 £</td><td>356,658 £</td></tr>
+      <tr><td>RMSE Std</td><td>84,775</td><td>53,909</td></tr>
+      <tr class="winner"><td><strong>CV%</strong></td><td>24.4%</td><td><strong>15.1% ✓</strong></td></tr>
+    </tbody>
+  </table>
+  <div class="callout-lg">MLP beats RF in 2 of 4 folds · CV 38% lower → more temporally stable</div>
+  <div class="foot">In real production, where macro regimes shift, the NN is the more robust candidate.</div>
+</div><div class="page-num">7 / 10</div></div>
+
+<!-- Slide 8 -->
+<div class="page"><div class="card">
+  <header><h1>PyTorch MLP — Architectural Safeguards</h1><p class="subtitle">Three critical design choices for heavy-tailed financial data</p></header>
+  <ul class="bullets">
+    <li class="hl"><span class="marker">①</span><span><strong>Log-target transformation</strong> — <code>log1p(y)</code> → near-Gaussian → gradient stability</span></li>
+    <li class="hl"><span class="marker">②</span><span><strong>Strategic bias initialization</strong> — <code>final_layer.bias = mean(log1p(y_train))</code> → eliminates Initial Guessing Bias</span></li>
+    <li class="hl"><span class="marker">③</span><span><strong>Log-clipping</strong> — <code>clamp(pred_log, min_log − margin, max_log + margin)</code> → impossible to predict £26B prices</span></li>
+    <li><span class="marker">●</span><span>Architecture: dropout(0.2) · AdamW · SmoothL1Loss · early stopping on val RMSE in GBP space</span></li>
+  </ul>
+</div><div class="page-num">8 / 10</div></div>
+
+<!-- Slide 9 -->
+<div class="page"><div class="card">
+  <header><h1>Dual-Track &amp; Honest Limitations</h1><p class="subtitle">What works with vendor features vs. where the model fails</p></header>
+  <div class="dual">
+    <section class="dual-col pos">
+      <h2>Assisted Track (with vendor features)</h2>
+      <ul>
+        <li>AssistedHistGBR Test RMSE: <strong>304,436 £</strong> (vs 393,489 mainline)</li>
+        <li>External benchmark <code>saleEstimate_lowerPrice</code>: <strong>350,168 £</strong></li>
+        <li><em>But:</em> depends on vendor data → not independently deployment-safe</li>
+      </ul>
+    </section>
+    <section class="dual-col neg">
+      <h2>Honest Limitations</h2>
+      <ul>
+        <li>Segment gate <strong>FAIL</strong> on: Detached, Semi-Detached, price_band &gt; 1M £</li>
+        <li>MAPE = 33.8% → within-10% rate only <strong>24.3%</strong> (below commercial AVM standard)</li>
+        <li>Large calendar shift: train 1995–2015 vs test 2018–2024 (much higher prices)</li>
+      </ul>
+    </section>
+  </div>
+</div><div class="page-num">9 / 10</div></div>
+
+<!-- Slide 10 -->
+<div class="page"><div class="card">
+  <header><h1>Conclusions &amp; Key Takeaways</h1></header>
+  <ol class="conclusions">
+    <li><span class="tag">RQ1</span><span>HistGBR dominates static holdout — R² 0.720, 57.6% RMSE uplift vs naive</span></li>
+    <li><span class="tag">RQ2</span><span>MLP is 38% more stable on walk-forward (CV 15.1% vs 24.4%) → better production candidate under temporal drift</span></li>
+    <li><span class="tag">RQ3</span><span>Bias initialization + log-clipping are critical for PyTorch MLP convergence on heavy-tailed financial data</span></li>
+    <li><span class="tag">RQ4</span><span>5-bin classification proxy (accuracy 49.51%) translates regression into accessible language for non-technical stakeholders</span></li>
+    <li><span class="tag">⊕</span><span>No universal winner — trees for peak static accuracy, NNs for temporal stability in production</span></li>
+  </ol>
+  <div class="final">Thank you · Questions?</div>
+</div><div class="page-num">10 / 10</div></div>
+
+</body></html>
